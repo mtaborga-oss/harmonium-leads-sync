@@ -7,12 +7,13 @@ Sincroniza emails de no-reply@harmonium.design al Excel en Google Drive
 import re
 import json
 import os
+import pickle
 from datetime import datetime
 from pathlib import Path
 import openpyxl
 from openpyxl.styles import Font, PatternFill
 from google.auth.transport.requests import Request
-from google.oauth2.service_account import Credentials
+from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import base64
@@ -30,26 +31,55 @@ class HarmoniumLeadsSync:
         self.load_processed_emails()
     
     def _authenticate_gmail(self):
-        """Autentica con Gmail API usando secrets de GitHub"""
-        creds_json = os.getenv('GOOGLE_CREDENTIALS')
-        if not creds_json:
-            raise ValueError("GOOGLE_CREDENTIALS no configurado en GitHub Secrets")
+        """Autentica con Gmail API usando token.pickle"""
+        creds = None
         
-        creds_dict = json.loads(creds_json)
-        creds = Credentials.from_service_account_info(
-            creds_dict, scopes=self.GMAIL_SCOPES)
+        # Intenta cargar token.pickle desde GitHub Actions
+        token_b64 = os.getenv('GOOGLE_TOKEN_PICKLE')
+        if token_b64:
+            try:
+                token_data = base64.b64decode(token_b64)
+                creds = pickle.loads(token_data)
+            except Exception as e:
+                print(f"Error decodificando token: {e}")
+                return None
+        
+        # Si no hay token en env, intenta archivo local
+        if not creds and Path('token.pickle').exists():
+            with open('token.pickle', 'rb') as token:
+                creds = pickle.load(token)
+        
+        # Refresca el token si es necesario
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        
+        if not creds:
+            raise ValueError("No credentials available")
         
         return build('gmail', 'v1', credentials=creds)
     
     def _authenticate_drive(self):
-        """Autentica con Google Drive API"""
-        creds_json = os.getenv('GOOGLE_CREDENTIALS')
-        if not creds_json:
-            raise ValueError("GOOGLE_CREDENTIALS no configurado")
+        """Autentica con Google Drive API usando el mismo token"""
+        creds = None
         
-        creds_dict = json.loads(creds_json)
-        creds = Credentials.from_service_account_info(
-            creds_dict, scopes=self.DRIVE_SCOPES)
+        token_b64 = os.getenv('GOOGLE_TOKEN_PICKLE')
+        if token_b64:
+            try:
+                token_data = base64.b64decode(token_b64)
+                creds = pickle.loads(token_data)
+            except Exception as e:
+                print(f"Error decodificando token: {e}")
+                return None
+        
+        if not creds and Path('token.pickle').exists():
+            with open('token.pickle', 'rb') as token:
+                creds = pickle.load(token)
+        
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        
+        if not creds:
+            raise ValueError("No credentials available")
         
         return build('drive', 'v3', credentials=creds)
     
